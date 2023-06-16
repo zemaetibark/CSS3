@@ -1,0 +1,186 @@
+# wordpress-deployment.yaml
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: wordpress # Optioneel: Vul hier een naam voor je deployment in.
+spec:
+  selector:
+    matchLabels:
+      name: wordpress
+  replicas: 1 # Aantal pods die gedeployed moeten worden
+  template:
+    metadata:
+      labels:
+        name: wordpress
+    spec:
+      nodeSelector:
+        node-type: web-server
+      containers:
+        - image: wordpress # Vul hier het image in die kubernetes moet gebruiken, OPTIONEEL: kies een eigen versie doormiddel van <image naam>:<release tag>
+          name: wordpress # Vul hier een naar voor je container in.
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: 10.43.73.89:3306 # Vul hier je <host-ip>:<outbound port> in
+            - name: WORDPRESS_DB_NAME
+              value: wordpress # Vul hier de naam van je database aan (bij default is er geen db en maak je die aan in phpmyadmin of via de terminal)
+            - name: WORDPRESS_DB_USER
+              value: root # Vul hier de user in waarmee Wordpress moet inloggen
+            - name: WORDPRESS_DB_PASSWORD
+              value: albin1234 # Vul hier het wachtwoord in waarmee Wordpress moet inloggen
+          resources:
+            limits:
+              cpu: "1" # Vul hier het maximum aantal CPU in, 1= 1 CPU-core
+              memory: "512Mi" # Vul hier het maximum aantal RAM geheugen in, 512Mi= 512 Megabytes
+            requests:
+              cpu: "100m" # Vul hier het minimum aantal CPU-cores in, 100m = 0.1 CPU-core
+              memory: "128Mi" # VUl hier het minimum aantal RAM geheugen in, 128Mi = 128 Megabytes
+          ports:
+            - containerPort: 7200 # Dit is de port waarmee de gebruiker verbinding wilt maken
+              name: wordpress
+---
+# phpmyadmin.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phpmyadmin
+spec:
+  selector:
+    matchLabels:
+      name: phpmyadmin # Vul hier de naam van de labels in die bij de pod horen
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        name: phpmyadmin
+    spec:
+      containers:
+      - name: phpmyadmin # Vul hier de naam van de container in
+        image: phpmyadmin/phpmyadmin # Vul hier het image in die kubernetes moet gebruiken, OPTIONEEL: kies een eigen versie doormiddel van <image naam>:<release tag>
+        ports:
+        - containerPort: 8080 # Dit is de port waarmee de gebruiker verbinding wilt maken
+        resources:
+        limits:
+          cpu: "1" # Vul hier het maximum aantal CPU in, 1= 1 CPU-core
+          memory: "512Mi" # Vul hier het maximum aantal RAM geheugen in, 512Mi= 512 Megabytes
+        requests:
+          cpu: "100m" # Vul hier het minimum aantal CPU-cores in, 100m = 0.1 CPU-core
+          memory: "128Mi" # Vul hier het minimum aantal RAM geheugen in, 128Mi = 128 Megabytes
+        env:
+        - name: CONFIG_DIR
+          value: /etc/phpmyadmin # Vul hier het pad van de configuratiedirectory in
+        volumeMounts:
+        - name: config
+          mountPath: /etc/phpmyadmin # Vul hier de naam en het pad van de volume in voor het koppelen van de configuratie aan de container
+      volumes:
+      - name: config
+        configMap:
+          name: phpmyadmin-config # Vul hier de naam van de configmap in voor het koppelen van de configuratie aan de container
+ 
+---
+# mysql.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mysql # Vul hier de naam van de pod in
+  labels:
+    name: mysql # Vul hier de naam van het label in die bij de pod hoort
+spec:
+  containers:
+    - name: mysql # Vul hier de naam van de container in
+      image: mysql # Vul hier het image in die kubernetes moet gebruiken, OPTIONEEL: kies een eigen versie doormiddel van <image naam>:<release tag>
+      env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: albin1234 # Vul hier het wachtwoord in voor de root-gebruiker van MySQL
+        - name: DB_NAME
+          value: wordpress # Vul hier de naam in van de database in die je wilt gebruiken.
+        - name: DB_USER
+          value: wordpress # Vul hier de gebruikersnaam in voor de nieuwe databasegebruiker
+        - name: DB_PASS
+          value: wordpress # Vul hier het wachtwoord in voor de nieuwe databasegebruiker
+      resources:
+        limits:
+          cpu: "1" # Vul hier het maximum aantal CPU in, 1= 1 CPU-core
+          memory: "512Mi" # Vul hier het maximum aantal RAM geheugen in, 512Mi= 512 Megabytes
+        requests:
+          cpu: "100m" # Vul hier het minimum aantal CPU-cores in, 100m = 0.1 CPU-core
+          memory: "128Mi" # Vul hier het minimum aantal RAM geheugen in, 128Mi = 128 Megabytes
+      ports:
+        - containerPort: 3306 # Dit is de port waarmee de gebruiker verbinding wilt maken
+          name: mysql
+---
+# wp-deployment-autoscaler.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wordpress # Vul hier de naam van de autoscaler in
+spec: # Specificatie voor de autoscaler
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wordpress # Vul hier de naam in van de deployment die we willen schalen
+  minReplicas: 1 # Geef hier het minimale aantal replicas aan
+  maxReplicas: 10 # Geef hier het maximale aantal replicas aan
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 10 # Vul hier de gemiddelde CPU-utilisatie in als target
+---
+#wordpress-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-data # Optioneel: Vul hier een naam voor je service in.
+spec:
+  type: ClusterIP # Optioneel: Pas dit aan naar NodePort als je toegang wilt verlenen buiten je cluster.
+  selector:
+    name: wordpress
+  ports:
+  - port: 7200 # Vul hier het port in waarmee de gebruiker verbinding moet aanvragen
+    targetPort: 80 # Vul hier het port in waar het verkeer doorgestuurd moet worden.
+   #nodePort: 300001 #Optioneel: Uncomment dit en pas het getal aan tussen 30000- 32767 als je wilt dat je een specifieke nodeport krijgt, alleen als je spec.type: NodePort invult!
+---
+#mysql-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-data # Optioneel: Vul hier een naam voor je service in.
+spec:
+  type: ClusterIP # Optioneel: Pas dit aan naar NodePort als je toegang wilt verlenen buiten je cluster.
+  selector:
+    name: mysql
+  ports:
+  - port: 3306  # Vul hier het port in waarmee de gebruiker verbinding moet aanvragen
+    targetPort: 3306 # Vul hier het port in waar het verkeer doorgestuurd moet worden.
+   #nodePort: 300001 # Optioneel: Uncomment dit en pas het getal aan tussen 30000- 32767 als je wilt dat je een specifieke nodeport krijgt, alleen als je spec.type: NodePort invult!
+---
+#PHPMyAdmin.service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: phpmyadmin-data # Optioneel: Vul hier een naam voor je service in.
+spec:
+  type: ClusterIP # Optioneel: Pas dit aan naar NodePort als je toegang wilt verlenen buiten je cluster.
+  selector:
+    name: phpmyadmin
+  ports:
+  - port: 8080 # Vul hier het port in waarmee de gebruiker verbinding moet aanvragen
+    targetPort: 80 # Vul hier het port in waar het verkeer doorgestuurd moet worden.
+   #nodePort: 300001 # Optioneel: Uncomment dit en pas het getal aan tussen 30000- 32767 als je wilt dat je een specifieke nodeport krijgt, alleen als je spec.type: NodePort invult!
+---
+#PHPMyAdmin.configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phpmyadmin-config # Optioneel: Vul hier een naam voor je configmap in
+data:
+  config.inc.php: | # Vul hier je filename in. (key)
+    <?php           # Begin content wat aangepast moet worden (value)
+    /* Servers configuration */
+    $i = 0;
+    /* Server: mysql */
+    $i++;
+    $cfg['Servers'][$i]['host'] = '10.43.73.89'; # Vul hier het clusterIP van je SQL database in
+    ?>
